@@ -10,6 +10,7 @@ Info-диалог.
 """
 
 import os
+import sys
 import flet as ft
 
 from core.state import new_state
@@ -32,10 +33,16 @@ def main(page: ft.Page):
     page.window.height = 840
     page.window.min_width = 1100
     page.window.min_height = 700
-    page.window.icon = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "icon.ico"
-    )
+    # Путь к иконке: и в dev-режиме, и в собранном exe.
+    # В exe PyInstaller распаковывает данные в sys._MEIPASS.
+    if getattr(sys, "frozen", False):
+        # Мы в собранном PyInstaller exe
+        _base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    else:
+        _base = os.path.dirname(os.path.abspath(__file__))
+    _icon_path = os.path.join(_base, "icon.ico")
+    if os.path.isfile(_icon_path):
+        page.window.icon = _icon_path
     page.padding = 0
     page.spacing = 0
 
