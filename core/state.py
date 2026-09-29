@@ -89,6 +89,7 @@ class MapEntry:
     size_bytes: int = 0                  # размер файла
     had_fixes: bool = False              # были ли фиксы
     fix_history: list = field(default_factory=list)
+    albedo_profile: str = None           # профиль текстуры для albedo (metal/wood/...)
 
 
 def new_state() -> dict:

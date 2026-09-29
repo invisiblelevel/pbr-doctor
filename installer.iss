@@ -4,7 +4,7 @@
 ; ═══════════════════════════════════════════════════════════
 
 #define MyAppName "PBR Doctor"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "INV.LVL"
 #define MyAppExeName "PBR Doctor.exe"
 
@@ -17,7 +17,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=Output
-OutputBaseFilename=PBR Doctor Setup
+OutputBaseFilename=PBR Doctor Setup v1.1.0
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

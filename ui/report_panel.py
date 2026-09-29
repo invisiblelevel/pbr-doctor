@@ -71,9 +71,20 @@ def build_report_panel(S: dict, page: ft.Page) -> ft.Control:
             ))
         else:
             inner.controls.append(_verdict(S, page, T, entry))
+
+            # Дропдаун профиля — только для albedo
+            if entry.map_type == MapType.ALBEDO:
+                inner.controls.append(_profile_selector(S, page, T, entry))
+
             inner.controls.append(_raw_metrics_expander(T, entry.report))
             inner.controls.append(divider(T["input"]))
             inner.controls.append(_issues(S, page, T, entry))
+
+            # Кнопка сброса фиксов — если есть хоть один
+            if entry.had_fixes or entry.fix_history:
+                inner.controls.append(
+                    _reset_fixes_button(S, page, T, entry)
+                )
 
     panel = ft.Container(
         content=inner,
@@ -311,6 +322,57 @@ def _explain_metrics(report) -> list:
         if (std is not None and std >= 0.03
                 and span is not None and span < 0.40):
             out.append((t("verdict.ao.narrow", p1=p1, p99=p99), "warn"))
+            
+    # ─── ALBEDO ───
+    elif mtype == "albedo":
+        profile = m.get("profile", "?")
+        std_l = m.get("std_L")
+        p1 = m.get("p1_L")
+        p99 = m.get("p99_L")
+        mean_s = m.get("mean_S")
+        soapy_pct = m.get("soapy_pct")
+        color_spread = m.get("color_spread")
+
+        if soapy_pct is not None and soapy_pct >= 20.0:
+            out.append((
+                t("verdict.albedo.soapy", pct=soapy_pct),
+                "warn"
+            ))
+        if p1 is not None and p1 < 10:
+            out.append((
+                t("verdict.albedo.dark", p1=p1, thr=10),
+                "warn"
+            ))
+        if p99 is not None and p99 > 250:
+            out.append((
+                t("verdict.albedo.light", p99=p99, thr=250),
+                "warn"
+            ))
+        if std_l is not None and std_l < 30.0:
+            out.append((
+                t("verdict.albedo.flat_contrast", std=std_l),
+                "warn"
+            ))
+        elif std_l is not None and std_l > 80.0:
+            out.append((
+                t("verdict.albedo.hard_contrast", std=std_l),
+                "warn"
+            ))
+        if mean_s is not None and mean_s < 0.15:
+            out.append((
+                t("verdict.albedo.flat_color", sat=mean_s),
+                "warn"
+            ))
+        elif mean_s is not None and mean_s > 0.75:
+            out.append((
+                t("verdict.albedo.oversaturated", sat=mean_s),
+                "warn"
+            ))
+        if color_spread is not None and color_spread > 15.0:
+            out.append((
+                t("verdict.albedo.color_cast", delta=color_spread),
+                "warn"
+            ))
 
     # ─── HEIGHT / EDGE / UNKNOWN ───
     elif mtype in ("height", "edge", "unknown"):
@@ -357,6 +419,90 @@ def _explain_metrics(report) -> list:
 # ═══════════════════════════════════════════════════════════
 #  СЫРЫЕ МЕТРИКИ
 # ═══════════════════════════════════════════════════════════
+
+def _profile_selector(S, page, T, entry: MapEntry) -> ft.Control:
+    """
+    Дропдаун выбора профиля текстуры для albedo-карт.
+    При смене — сохраняет в entry.albedo_profile и переанализирует карту.
+    """
+    from core.albedo_profiles import sorted_profile_keys
+    from core.analyzers import get_analyzer
+    from core.i18n import t
+
+    profile_keys = sorted_profile_keys()
+
+    current = entry.albedo_profile or "stone"
+    if current not in profile_keys:
+        current = "stone"
+
+    def on_profile_change(e):
+        new_key = e.control.value
+        if new_key == entry.albedo_profile:
+            return
+
+        entry.albedo_profile = new_key
+        entry.fix_history.clear()
+        entry.had_fixes = False
+
+        # Переанализ карты под новый профиль
+        analyzer = get_analyzer(entry.map_type.value)
+        if analyzer is not None:
+            if hasattr(analyzer, "_profile_key"):
+                analyzer._profile_key = new_key
+            try:
+                entry.report = analyzer.analyze(
+                    entry.working,
+                    profile_key=new_key,
+                    filename=entry.filename,
+                )
+            except Exception as ex:
+                log(S, f"✗ Переанализ не удался: {ex}", T["danger"])
+                return
+
+        log(S, t("panel.profile_changed", profile=t(f"albedo.profile.{new_key}")),
+            T["fg2"])
+
+        # Перерисовать правую панель + таблицу слева
+        try:
+            panel = S.get("report_panel")
+            if panel is not None and hasattr(panel, "render"):
+                panel.render()
+        except Exception:
+            pass
+
+        page.update()
+
+    options = [
+        ft.dropdown.Option(
+            key=k,
+            text=t(f"albedo.profile.{k}")
+        )
+        for k in profile_keys
+    ]
+
+    dd = ft.Dropdown(
+        value=current,
+        options=options,
+        width=280,
+        text_style=ft.TextStyle(font_family=FONT, color=T["fg"], size=12),
+        border=ft.OutlineInputBorder(),
+        bgcolor=T["input"],
+        content_padding=ft.Padding.symmetric(vertical=4, horizontal=8),
+    )
+    dd.on_select = on_profile_change
+
+    return ft.Container(
+        content=ft.Column([
+            ft.Text(t("panel.profile_label"),
+                    color=T["fg3"], size=11, font_family=FONT,
+                    weight=ft.FontWeight.W_600),
+            dd,
+        ], spacing=4),
+        bgcolor=T["card"],
+        padding=10,
+        border_radius=8,
+        border=ft.Border.all(1, T["input"]),
+    )
 
 def _raw_metrics_expander(T, report) -> ft.Control:
     """Свёрнутый блок «Сырые метрики» — клик -> раскрывается."""
@@ -419,6 +565,79 @@ def _build_raw_metric_rows(T, report) -> list:
 # ═══════════════════════════════════════════════════════════
 #  ISSUES
 # ═══════════════════════════════════════════════════════════
+
+def _reset_fixes_button(S, page, T, entry: MapEntry) -> ft.Control:
+    """
+    Кнопка «Сбросить все фиксы» — возвращает карту к original,
+    сбрасывает report / fix_history / had_fixes и переанализирует.
+    Нужна потому что Undo откатывает только последний фикс,
+    и не для всех типов (иногда prev_working теряется).
+    """
+    from core.analyzers import get_analyzer
+
+    def on_reset(e):
+        entry.working = entry.original.copy()
+        entry.fix_history.clear()
+        entry.had_fixes = False
+
+        analyzer = get_analyzer(entry.map_type.value)
+        if analyzer is not None:
+            # Профиль — из entry (для albedo)
+            if (entry.map_type == MapType.ALBEDO
+                    and entry.albedo_profile
+                    and hasattr(analyzer, "_profile_key")):
+                analyzer._profile_key = entry.albedo_profile
+
+            try:
+                entry.report = analyzer.analyze(
+                    entry.working,
+                    profile_key=entry.albedo_profile,
+                    filename=entry.filename,
+                )
+            except Exception:
+                entry.report = None
+        else:
+            entry.report = None
+
+        log(S, t("panel.fixes_reset_log", name=entry.filename), T["fg2"])
+
+        # Перерисовать правую панель
+        try:
+            panel = S.get("report_panel")
+            if panel is not None and hasattr(panel, "render"):
+                panel.render()
+        except Exception:
+            pass
+
+        # Перерисовать таблицу слева (кол-во issues, светофор)
+        try:
+            # таблица в Analyze-вкладке
+            from ui.tab_analyze import rebuild_table
+            # найдём table_container через S
+            tc = S.get("analyze_table_container")
+            osm = S.get("analyze_on_select_map")
+            if tc is not None:
+                rebuild_table(S, page, tc, osm)
+        except Exception:
+            pass
+
+        page.update()
+
+    btn = make_btn_compact(
+        t("panel.fixes_reset"),
+        on_click=on_reset,
+        color=T["danger"],
+        icon="rotate-ccw",
+        fg3=T["fg3"], input_bg=T["input"],
+    )
+
+    return ft.Container(
+        content=ft.Row([
+            ft.Container(expand=True),
+            btn,
+        ], spacing=6),
+        padding=ft.Padding.symmetric(vertical=6),
+    )
 
 def _issues(S, page, T, entry: MapEntry) -> ft.Control:
     """Список Issue с кнопками Fix."""
@@ -511,6 +730,16 @@ def _make_fix_result_row(S, page, T, entry: MapEntry, rec: dict) -> ft.Control:
     b = order.get(before, 3)
     a = order.get(after, 3)
 
+    # Считаем улучшения метрик по тому же принципу что в модалке
+    from ui.dialogs_fix import _compute_metric_deltas
+
+    mb = rec.get("prev_report").metrics if rec.get("prev_report") else {}
+    ma = entry.report.metrics if entry.report else {}
+    mtype = entry.map_type.value
+    deltas = _compute_metric_deltas(mtype, mb, ma)
+    improved = sum(1 for d in deltas if d["verdict"] == "better")
+    worse = sum(1 for d in deltas if d["verdict"] == "worse")
+
     if a == 0 and b != 0:
         icon_name = "check"
         icon_color = T["success"]
@@ -520,6 +749,14 @@ def _make_fix_result_row(S, page, T, entry: MapEntry, rec: dict) -> ft.Control:
         icon_color = T["warn"]
         text = t("panel.fix_result.better",
                  before=t("sev." + before), after=t("sev." + after))
+    elif a == b and improved > 0 and worse == 0:
+        icon_name = "chevron-down"
+        icon_color = T["warn"]
+        text = t("panel.fix_result.metrics_better", n=improved)
+    elif a == b and worse > 0 and improved == 0:
+        icon_name = "x"
+        icon_color = T["danger"]
+        text = t("panel.fix_result.metrics_worse", n=worse)
     elif a == b:
         icon_name = "info"
         icon_color = T["fg2"]
@@ -599,6 +836,14 @@ async def _apply_fix_inline(S, page, T, entry: MapEntry, fix_id: str,
             pass
 
     set_progress_callback(_progress_cb)
+
+    # Если это albedo — прокидываем профиль из entry в анализатор,
+    # иначе fix не знает под какой профиль чинить
+    if (entry.map_type == MapType.ALBEDO
+            and entry.albedo_profile
+            and hasattr(analyzer, "_profile_key")):
+        analyzer._profile_key = entry.albedo_profile
+
     try:
         fixed = analyzer.fix(entry.working, fix_id)
     except Exception as ex:
@@ -619,7 +864,11 @@ async def _apply_fix_inline(S, page, T, entry: MapEntry, fix_id: str,
         pass
 
     try:
-        entry.report = analyzer.analyze(entry.working)
+        entry.report = analyzer.analyze(
+            entry.working,
+            profile_key=entry.albedo_profile,
+            filename=entry.filename,
+        )
     except Exception as ex:
         await hide_progress(S, page)
         log(S, t("panel.refix_fail", err=str(ex)), T["danger"])
@@ -660,6 +909,9 @@ async def _apply_fix_inline(S, page, T, entry: MapEntry, fix_id: str,
         severity_after=sev_after,
         issues_before=issues_before,
         issues_after=issues_after,
+        metrics_before=(prev_report.metrics if prev_report else {}),
+        metrics_after=(entry.report.metrics if entry.report else {}),
+        map_type=entry.map_type.value,
     )
 
     try:

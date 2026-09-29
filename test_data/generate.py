@@ -16,10 +16,14 @@ test_data/generate.py — генерит тестовые PBR-карты для 
     ao_clean.png          — нормальное AO
     ao_inverted.png       — перевёрнутое AO
     test_orm.png          — ORM (R=AO, G=Rough, B=Metal)
+    albedo_soapy.png      — albedo с настоящей мыльностью
+    albedo_dark.png       — albedo с недосветом
+    albedo_oversaturated.png — albedo с перенасыщенностью
 """
 
 import os
 import numpy as np
+import cv2
 from PIL import Image
 
 
@@ -164,18 +168,15 @@ def make_orm(size: int = 512) -> np.ndarray:
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
     cx, cy = size / 2, size / 2
 
-    # R — AO: радиальное затемнение к краям + лёгкий шум
     dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / (size / 2)
     r = np.clip(1.0 - dist * 0.7, 0.15, 1.0)
     r += rng.normal(0, 0.02, (size, size)).astype(np.float32)
     r = np.clip(r, 0, 1)
 
-    # G — Roughness: широкий диапазон + синус-рябь + шум
     g = 0.3 + 0.6 * rng.random((size, size)).astype(np.float32)
     g += 0.1 * np.sin(xx / 30.0) * np.cos(yy / 30.0)
     g = np.clip(g, 0, 1)
 
-    # B — Metallic: бинарное, пятна
     b = np.zeros((size, size), dtype=np.float32)
     for _ in range(4):
         px = rng.integers(60, size - 60)
@@ -188,23 +189,70 @@ def make_orm(size: int = 512) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════
+#  ALBEDO
+# ═══════════════════════════════════════════════════════════
+
+def make_albedo_soapy_v2(size: int = 512) -> np.ndarray:
+    """
+    Настоящая мыльность: шумная текстура, размытая в правой половине.
+    Не серая заливка — именно потеря деталей.
+    """
+    rng = np.random.default_rng(11)
+    r = 0.3 + 0.4 * rng.random((size, size)).astype(np.float32)
+    g = 0.4 + 0.4 * rng.random((size, size)).astype(np.float32)
+    b = 0.5 + 0.4 * rng.random((size, size)).astype(np.float32)
+    rgb = np.stack([r, g, b], axis=-1)
+    blur = cv2.GaussianBlur(rgb, (0, 0), sigmaX=8.0)
+    rgb[:, size // 2:] = blur[:, size // 2:]
+    return np.clip(rgb, 0, 1)
+
+
+def make_albedo_dark(size: int = 512) -> np.ndarray:
+    """Albedo с недосветом — всё в тёмных тонах."""
+    rng = np.random.default_rng(12)
+    r = 0.05 + 0.15 * rng.random((size, size)).astype(np.float32)
+    g = 0.07 + 0.15 * rng.random((size, size)).astype(np.float32)
+    b = 0.09 + 0.15 * rng.random((size, size)).astype(np.float32)
+    return np.stack([r, g, b], axis=-1)
+
+
+def make_albedo_oversaturated(size: int = 512) -> np.ndarray:
+    """Albedo с перенасыщенными цветами."""
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32) / size
+    r = 0.5 + 0.5 * np.sin(xx * 20)
+    g = 0.5 + 0.5 * np.cos(yy * 20)
+    b = 0.5 + 0.5 * np.sin((xx + yy) * 15)
+    rgb = np.stack([r, g, b], axis=-1)
+    hsv = cv2.cvtColor(
+        np.clip(rgb * 255, 0, 255).astype(np.uint8),
+        cv2.COLOR_RGB2HSV
+    ).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.8, 0, 255)
+    rgb = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+    return (rgb.astype(np.float32) / 255.0)
+
+
+# ═══════════════════════════════════════════════════════════
 #  MAIN
 # ═══════════════════════════════════════════════════════════
 
 def main():
     # (имя, массив, энкодер)
     cases = [
-        ("normal_clean.png",      make_clean(),              encode_normal),
-        ("normal_baked.png",      make_baked(),              encode_normal),
-        ("normal_broken_b.png",   make_broken_b(),           encode_normal),
-        ("not_normal.png",        make_not_normal(),         encode_rgb01),
-        ("roughness_dead.png",    make_dead_roughness(),     encode_rgb01),
-        ("roughness_color.png",   make_colorful_roughness(), encode_rgb01),
-        ("metallic_muddy.png",    make_muddy_metallic(),     encode_rgb01),
-        ("metallic_clean.png",    make_clean_metallic(),     encode_rgb01),
-        ("ao_clean.png",          make_clean_ao(),           encode_rgb01),
-        ("ao_inverted.png",       make_inverted_ao(),        encode_rgb01),
-        ("test_orm.png",          make_orm(),                encode_rgb01),
+        ("normal_clean.png",         make_clean(),                encode_normal),
+        ("normal_baked.png",         make_baked(),                encode_normal),
+        ("normal_broken_b.png",      make_broken_b(),             encode_normal),
+        ("not_normal.png",           make_not_normal(),           encode_rgb01),
+        ("roughness_dead.png",       make_dead_roughness(),       encode_rgb01),
+        ("roughness_color.png",      make_colorful_roughness(),   encode_rgb01),
+        ("metallic_muddy.png",       make_muddy_metallic(),       encode_rgb01),
+        ("metallic_clean.png",       make_clean_metallic(),       encode_rgb01),
+        ("ao_clean.png",             make_clean_ao(),             encode_rgb01),
+        ("ao_inverted.png",          make_inverted_ao(),          encode_rgb01),
+        ("test_orm.png",             make_orm(),                  encode_rgb01),
+        ("albedo_soapy.png",         make_albedo_soapy_v2(),      encode_rgb01),
+        ("albedo_dark.png",          make_albedo_dark(),          encode_rgb01),
+        ("albedo_oversaturated.png", make_albedo_oversaturated(), encode_rgb01),
     ]
     for name, data, encoder in cases:
         rgb = encoder(data)

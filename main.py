@@ -21,6 +21,7 @@ from ui.tab_analyze import build_analyze_tab
 from ui.tab_seamless import build_seamless_tab
 from ui.report_panel import build_report_panel
 from ui.info_dialog import create_info_dialog
+from core.i18n import t
 
 
 # ═══════════════════════════════════════════════════════════
@@ -28,7 +29,7 @@ from ui.info_dialog import create_info_dialog
 # ═══════════════════════════════════════════════════════════
 
 def main(page: ft.Page):
-    page.title = "PBR Doctor 1.0.0"
+    page.title = "PBR Doctor 1.1.0"
     page.window.width = 1320
     page.window.height = 840
     page.window.min_width = 1100
@@ -363,7 +364,7 @@ def main(page: ft.Page):
             img_icon("search-check", S["theme"]["accent"], 22),
             ft.Text(t("app.title"), color=S["theme"]["fg"], size=16,
                     font_family=FONT, weight=ft.FontWeight.W_600),
-            ft.Text("1.0.0", color=S["theme"]["fg3"], size=11,
+            ft.Text("1.1.0", color=S["theme"]["fg3"], size=11,
                     font_family=FONT),
             ft.Container(expand=True),
             ft.Text(t("app.tagline"),

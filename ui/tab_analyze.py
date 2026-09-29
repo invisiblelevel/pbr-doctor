@@ -158,6 +158,10 @@ def build_analyze_tab(S: dict, page: ft.Page,
     result.rebuild = rebuild
     result.table_container = table_container
 
+    # Ссылки для перерисовки из других мест (report_panel)
+    S["analyze_table_container"] = table_container
+    S["analyze_on_select_map"] = on_select_map
+
     rebuild()
     return result
 
@@ -217,6 +221,13 @@ async def load_files(S, page, paths, table_container, on_select_map):
         fname = os.path.basename(p)
         mtype, conf, by = detect(fname, arr)
 
+        # Профиль текстуры для albedo: авто-детект по имени файла.
+        # Юзер потом может поменять в правой панели.
+        albedo_profile = None
+        if mtype == MapType.ALBEDO:
+            from core.albedo_profiles import detect_profile
+            albedo_profile = detect_profile(fname)
+
         entry = MapEntry(
             path=p,
             filename=fname,
@@ -226,6 +237,7 @@ async def load_files(S, page, paths, table_container, on_select_map):
             original=arr,
             working=arr.copy(),
             size_bytes=get_file_size(p),
+            albedo_profile=albedo_profile,
         )
 
         S["maps"].append(entry)
@@ -271,6 +283,16 @@ async def analyze_all(S, page, table_container, on_select_map):
                 T["fg3"])
             done += 1
             continue
+
+        # Если это albedo — прокидываем сохранённый профиль в анализатор,
+        # иначе фикс потом не будет знать под что чинить.
+        try:
+            if (entry.map_type == MapType.ALBEDO
+                    and entry.albedo_profile):
+                if hasattr(analyzer, "_profile_key"):
+                    analyzer._profile_key = entry.albedo_profile
+        except Exception:
+            pass
 
         try:
             report = analyzer.analyze(entry.working)
@@ -508,6 +530,7 @@ def _make_table_header(T) -> ft.Control:
             _h(t("tab_analyze.col.file"), expand=True),
             _h(t("tab_analyze.col.issues"), width=80),
             _h(t("tab_analyze.col.size"), width=80),
+            ft.Container(width=32),   # ← место под корзину
         ], spacing=10),
         bgcolor=T["card"],
         padding=ft.Padding.symmetric(vertical=8, horizontal=10),
@@ -591,6 +614,46 @@ def _make_table_row(S, page, table_container, idx, entry: MapEntry,
             on_select_map(S, idx)
         page.update()
 
+    def on_delete(e):
+        # Остановить всплытие (чтобы клик по корзине
+        # не выбирал строку)
+        try:
+            e.stop_propagation()
+        except Exception:
+            pass
+
+        # Удаляем карту
+        if 0 <= idx < len(S["maps"]):
+            S["maps"].pop(idx)
+
+        # Скорректировать selected_idx
+        if S.get("selected_idx") is not None:
+            if S["selected_idx"] == idx:
+                S["selected_idx"] = None
+            elif S["selected_idx"] > idx:
+                S["selected_idx"] -= 1
+
+        log(S, t("tab_analyze.log.deleted", name=entry.filename),
+            T["fg2"])
+
+        # Перерисовать таблицу
+        rebuild_table(S, page, table_container, on_select_map)
+
+        # Обновить правую панель
+        if on_select_map:
+            on_select_map(S, S.get("selected_idx"))
+
+        page.update()
+
+    btn_delete = ft.Container(
+        content=img_icon("trash-2", T["fg3"], 14),
+        padding=6,
+        border_radius=6,
+        ink=True,
+        on_click=on_delete,
+        tooltip=t("tab_analyze.delete_tooltip"),
+    )
+
     return ft.Container(
         content=ft.Row([
             ft.Container(content=dot, width=22,
@@ -601,6 +664,7 @@ def _make_table_row(S, page, table_container, idx, entry: MapEntry,
                          alignment=ft.Alignment.CENTER_LEFT),
             ft.Container(content=size_txt, width=80,
                          alignment=ft.Alignment.CENTER_LEFT),
+            btn_delete,
         ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         bgcolor=bg,
         padding=ft.Padding.symmetric(vertical=6, horizontal=10),
