@@ -41,8 +41,11 @@ class RoughnessAnalyzer(BaseAnalyzer):
 
     MAP_TYPE = MapType.ROUGHNESS.value
 
-    def analyze(self, img: np.ndarray) -> Report:
+    def analyze(self, img: np.ndarray,
+                profile_key: str = None,
+                filename: str = None) -> Report:
         img = self.to_float01(img)
+        img = self.downsample_for_analysis(img, max_size=2048)
 
         # ─── цветность ───
         rgb_stack = np.stack([img[:, :, 0], img[:, :, 1], img[:, :, 2]],

@@ -70,8 +70,11 @@ class ORMAnalyzer(BaseAnalyzer):
     #  АНАЛИЗ
     # ─────────────────────────────────────────────────────
 
-    def analyze(self, img: np.ndarray) -> Report:
+    def analyze(self, img: np.ndarray,
+                profile_key: str = None,
+                filename: str = None) -> Report:
         img = self.to_float01(img)
+        img = self.downsample_for_analysis(img, max_size=2048)
         if img.ndim != 3 or img.shape[2] < 3:
             return Report(
                 map_type=self.MAP_TYPE,

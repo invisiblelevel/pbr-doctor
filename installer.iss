@@ -4,7 +4,8 @@
 ; ═══════════════════════════════════════════════════════════
 
 #define MyAppName "PBR Doctor"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
+#define MyAppVersionLabel "1.1.1-beta"
 #define MyAppPublisher "INV.LVL"
 #define MyAppExeName "PBR Doctor.exe"
 
@@ -12,12 +13,13 @@
 AppId={{8F3B2A1C-9D4E-4F7A-B1C2-3E5D6F7A8B9C}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersionLabel}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=Output
-OutputBaseFilename=PBR Doctor Setup v1.1.0
+OutputBaseFilename=PBR Doctor Setup v{#MyAppVersionLabel}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -29,6 +31,7 @@ SetupIconFile=icon.ico
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinese"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1-beta] — 2026-10-02
+
+Performance and compatibility release: DirectML backend for GPU inference on any GPU (NVIDIA / AMD / Intel), faster soapiness fix, full-resolution preview, and cleanup of diagnostic output.
+
+### Added
+
+#### Preview
+- **Full-screen map preview** — click the thumbnail in the right panel to open a 1400×820 modal with the full-resolution image
+- **Before / After toggle** in the preview modal — flip between original and fixed version (only shown if fixes were applied)
+- **"Enlarge" hint** overlaid on the thumbnail so users know it's clickable
+
+### Changed
+
+#### Deblur (Remove Soapiness)
+- **Single-pass SCUNet inference** — the second model pass was removed. It contributed little quality-wise but doubled inference time. Soapiness fix is now ~2× faster
+- **Fixed-shape model** — `SCUNet-GAN-fixed.onnx` with static input `[1, 3, 256, 256]` (required for DirectML, which does not support dynamic input shapes)
+- **Old dynamic-shape model removed** — `SCUNet-GAN.onnx` is no longer needed and can be deleted
+
+#### Execution Provider
+- **DirectML instead of CUDA** — the model now runs through `onnxruntime-directml`, which works on **any GPU via DirectX 12**: NVIDIA, AMD, Intel. No CUDA Toolkit, cuDNN, or TensorRT installation required
+- **CPU fallback** — if DirectML is unavailable, inference falls back to CPU automatically
+
+#### Map Detection
+- **Albedo always wins by filename** — if the filename contains `albedo`, `alb`, `basecolor`, `base_color`, `diffuse`, `diff`, `colour`, `texture`, `tex`, or `bc`, the map is classified as Albedo regardless of content. This fixes cases where AI-generated albedo maps were being misdetected as Metallic / Edge / Height
+- **ORM always wins by filename** — same priority rule for `orm`, `rma`, `mra`, `arm`, `mre`
+
+#### Progress Reporting
+- **Determinate progress bar** — shows real percentage based on processed tiles, not an indeterminate spinner
+- **Live tile counter** — text like "Deblur: 245/1369 tiles" updates every 250 ms
+- **Main-thread polling** — UI updates happen from the main Flet thread via `asyncio.create_task` polling, avoiding DirectML / GIL deadlocks
+
+#### UI / UX
+- **Version** bumped to `1.1.1-beta` in window title, header, and About dialog
+- **Build date** updated to `2026-10-02`
+
+### Fixed
+
+- **UI freeze on 8K maps** — `analyzer.fix()` and `analyzer.analyze()` now run through `asyncio.to_thread`, so the Flet event loop stays responsive during long operations
+- **DirectML hang on dynamic-shape model** — fixed by re-exporting SCUNet with a static input shape. Previously `session.run()` would hang indefinitely on the first tile
+- **Progress callback crash** — `page.update()` is no longer called from the background thread (unsafe in Flet); the callback now only writes to `S` and a main-thread poller applies the updates
+- **Albedo misdetected as Metallic / Edge** — fixed by giving filename rules for Albedo priority over content-based detection
+
+### Removed
+
+- **Diagnostic `print()` calls** — `[fix]`, `[scunet]`, `[deblur]` debug output removed from the console
+- **`SCUNet-GAN.onnx`** (dynamic-shape model) — replaced by `SCUNet-GAN-fixed.onnx`
+- **`core/io_patch.py`** — obsolete monkey-patch, no longer imported
+- **TensorRT and CUDA provider branches** — replaced by a single DirectML / CPU priority list
+
+### Technical
+
+- **Provider priority**: `DmlExecutionProvider` → `CPUExecutionProvider`
+- **Model**: `SCUNet-GAN-fixed.onnx`, static input `[1, 3, 256, 256]`, tile size 256, overlap 32, reflect padding for edge tiles
+- **Tile inference**: per-tile run with triangular window blending to avoid seams
+- **Deblur fix**: single model pass + multi-scale detail boost (3 Gaussian scales) + soft clip + bilateral filter
+- **`BaseAnalyzer.downsample_for_analysis()`** — analysis runs on a ≤2048 px copy of the map; fixes still operate on the full-resolution array
+- **Preview cache** — thumbnail base64 cached by `id(entry.working)`, invalidated when a fix replaces the array
+
+---
+
 ## [1.1.0] — 2025-09-29
 
 Major feature release: Albedo analyzer, full localization, ORM, Seamless tab, and a reworked fix dialog with human-readable metrics.
@@ -74,11 +134,11 @@ Major feature release: Albedo analyzer, full localization, ORM, Seamless tab, an
 
 - **Normal analyzer** — `broken_b_channel` criterion changed to `mean_len < 0.85` (was `b_std < 0.05`, which caused a false-positive loop)
 - **Normal analyzer** — `baked_light` only checked when `mean_len >= 0.85` (angle is unreliable for degenerate maps)
-- **Fix dialog** — takes into account metric deltas, not just severity (shows "Improved (2 metrics)" instead of "No change" when severity stays the same)
-- **`auto_correct` for Albedo** — was running with the default "stone" profile regardless of the actual map type (now uses the detected or user-selected profile)
+- **Fix dialog** — takes into account metric deltas, not just severity
+- **`auto_correct` for Albedo** — was running with the default "stone" profile regardless of the actual map type
 - **`remove_soap`** — completely reworked: was doing nothing useful with the old multi-scale algorithm; now uses SCUNet-GAN with a deficit mask
 - **Locale detection** — uses `ctypes.windll.kernel32.GetUserDefaultUILanguage()` for more reliable detection on Windows
-- **Fix history** — cleared when changing map type or texture profile (fixes from a different type are invalid)
+- **Fix history** — cleared when changing map type or texture profile
 - **Seamless** — `detect_seam` no longer triggers on grayscale maps with slightly different edge pixels
 
 ### Technical
@@ -91,7 +151,7 @@ Major feature release: Albedo analyzer, full localization, ORM, Seamless tab, an
 - **New module**: `core/analyzers/fallback.py` — height / edge / unknown
 - **New module**: `core/analyzers/albedo.py` — albedo analyzer + 10 fixes
 - **New module**: `ui/tab_seamless.py` — Seamless tab
-- **Model bundled**: `assets/models/SCUNet-GAN.onnx` (~91 MB, compressed to ~30 MB in installer)
+- **Model bundled**: `assets/models/SCUNet-GAN-fixed.onnx`
 - **Refactor**: `Issue` now stores localization keys (`title_key`, `detail_key`, `fix_label_key`) instead of raw strings
 - **Refactor**: `Report` metrics are now the single source of truth for the fix result dialog
 - **Refactor**: `analyze()` for Albedo accepts `profile_key` and `filename` arguments
@@ -100,7 +160,7 @@ Major feature release: Albedo analyzer, full localization, ORM, Seamless tab, an
 
 - **Empty right panel on Seamless tab** — now hidden for full-width layout
 - **`ai_edge_litert` dependency** — was used for a NAFNet TFLite test that didn't pan out; SCUNet works through OpenCV dnn
-- **NAFNet models** (2025may ONNX, fp16 TFLite, GoPro-width64 ONNX) — replaced by SCUNet-GAN
+- **NAFNet models** — replaced by SCUNet-GAN
 
 ---
 
@@ -144,5 +204,6 @@ Initial public release.
 
 ---
 
+[1.1.1-beta]: ../../compare/v1.1.0...v1.1.1-beta
 [1.1.0]: ../../compare/v1.0.0...v1.1.0
 [1.0.0]: ../../releases/tag/v1.0.0

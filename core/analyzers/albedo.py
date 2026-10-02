@@ -75,6 +75,7 @@ class AlbedoAnalyzer(BaseAnalyzer):
                 profile_key: str = None,
                 filename: str = None) -> Report:
         img = self.to_float01(img)
+        img = self.downsample_for_analysis(img, max_size=2048)
         if img.ndim != 3 or img.shape[2] < 3:
             return Report(
                 map_type=self.MAP_TYPE,
@@ -435,18 +436,13 @@ class AlbedoAnalyzer(BaseAnalyzer):
     def _fix_remove_soap(self, img: np.ndarray,
                           strength: float = 1.0) -> np.ndarray:
         """
-        Комбо-фикс: SCUNet (2 прохода) + мягкий multi-scale detail boost.
+        Комбо-фикс: SCUNet (1 проход) + мягкий multi-scale detail boost.
 
-        Упор на качество, без пережатия:
-          - 1-й проход модели восстанавливает форму
-          - 2-й проход мягко дожимает остатки
-          - математика работает деликатно, только где мыло
-          - soft clip жёстче, bilateral мягче
-          - не пережигает чистые зоны
-
-        strength: 0.5 – очень мягко, 1.0 – стандарт, 1.5 – сильнее.
+        Второй проход модели убран — он давал маленький вклад,
+        но удваивал время. Оставлен один проход + математика.
         """
         from core.deblur_model import get_nafnet_model, deblur_image
+        from core.analyzers.base import emit_progress
 
         net = get_nafnet_model()
         if net is None:
@@ -457,7 +453,7 @@ class AlbedoAnalyzer(BaseAnalyzer):
         lab = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2LAB).astype(np.float32)
         L = lab[:, :, 0]
 
-        # ─── Маска deficit (как в analyze) ───
+        # ─── Маска deficit ───
         k = SOAP_WINDOW if SOAP_WINDOW % 2 == 1 else SOAP_WINDOW + 1
         mean_b = cv2.blur(L, (k, k))
         sq_mean = cv2.blur(L * L, (k, k))
@@ -476,33 +472,26 @@ class AlbedoAnalyzer(BaseAnalyzer):
         s = float(np.clip(strength, 0.0, 2.0))
 
         # ═══════════════════════════════════════════════════
-        #  ШАГ 1 — модель, проход 1 (полный)
+        #  ЕДИНСТВЕННЫЙ ПРОХОД МОДЕЛИ
         # ═══════════════════════════════════════════════════
+        emit_progress("Де-блюр...")
         model_out1 = deblur_image(net, img, deficit_mask=None)
 
         m1 = np.clip(deficit * s, 0.0, 1.0)[:, :, None]
         pass1 = img * (1.0 - m1) + model_out1 * m1
         pass1 = np.clip(pass1, 0.0, 1.0).astype(np.float32)
 
-        # ═══════════════════════════════════════════════════
-        #  ШАГ 2 — модель, проход 2 (мягкий, 0.4)
-        # ═══════════════════════════════════════════════════
-        model_out2 = deblur_image(net, pass1, deficit_mask=None)
-
-        m2 = np.clip(deficit * s * 0.4, 0.0, 1.0)[:, :, None]
-        pass2 = pass1 * (1.0 - m2) + model_out2 * m2
-        pass2 = np.clip(pass2, 0.0, 1.0).astype(np.float32)
+        emit_progress("Detail boost...")
 
         # ═══════════════════════════════════════════════════
-        #  ШАГ 3 — мягкий multi-scale detail boost
+        #  Мягкий multi-scale detail boost
         # ═══════════════════════════════════════════════════
         lab2 = cv2.cvtColor(
-            np.clip(pass2 * 255, 0, 255).astype(np.uint8),
+            np.clip(pass1 * 255, 0, 255).astype(np.uint8),
             cv2.COLOR_RGB2LAB,
         ).astype(np.float32)
         L2 = lab2[:, :, 0]
 
-        # Multi-scale разложение
         b1 = cv2.GaussianBlur(L2, (0, 0), sigmaX=8.0)
         b2 = cv2.GaussianBlur(L2, (0, 0), sigmaX=4.0)
         b3 = cv2.GaussianBlur(L2, (0, 0), sigmaX=2.0)
@@ -511,7 +500,6 @@ class AlbedoAnalyzer(BaseAnalyzer):
         d3 = b2 - b3
         d4 = L2 - b3
 
-        # Мягкие коэффициенты — не пережигаем
         amp = deficit * s
         d2_new = d2 * (1.0 + 0.8 * amp)
         d3_new = d3 * (1.0 + 1.4 * amp)
@@ -519,7 +507,6 @@ class AlbedoAnalyzer(BaseAnalyzer):
 
         L_new = b1 + d2_new + d3_new + d4_new
 
-        # ─── Soft clip ───
         local_mean = cv2.GaussianBlur(L_new, (0, 0), sigmaX=3.0)
         excess = L_new - local_mean
         CLIP = 10.0
@@ -527,13 +514,11 @@ class AlbedoAnalyzer(BaseAnalyzer):
         L_new = local_mean + soft_excess
         L_new = np.clip(L_new, 0, 255)
 
-        # ─── Bilateral (мягкий) ───
         L_u8 = L_new.astype(np.uint8)
         L_clean = cv2.bilateralFilter(
             L_u8, d=5, sigmaColor=10, sigmaSpace=7
         ).astype(np.float32)
 
-        # Финальная смешка: только в мыльных зонах
         L_final = L2 * (1 - deficit) + L_clean * deficit
 
         lab2[:, :, 0] = np.clip(L_final, 0, 255)

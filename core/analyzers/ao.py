@@ -42,8 +42,11 @@ class AOAnalyzer(BaseAnalyzer):
 
     MAP_TYPE = MapType.AO.value
 
-    def analyze(self, img: np.ndarray) -> Report:
+    def analyze(self, img: np.ndarray,
+                profile_key: str = None,
+                filename: str = None) -> Report:
         img = self.to_float01(img)
+        img = self.downsample_for_analysis(img, max_size=2048)
 
         # ─── цветность ───
         rgb_stack = np.stack([img[:, :, 0], img[:, :, 1], img[:, :, 2]],
@@ -132,8 +135,6 @@ class AOAnalyzer(BaseAnalyzer):
             ))
 
         # ── 4. Слишком светлая ──
-        # AO с открытой сценой — норма. Диапазон полный, std в норме,
-        # фиксить тут нечего. Оставляем warn без fix.
         if mean > LIGHT_MEAN_THRESH and dark_pct < 5.0:
             issues.append(Issue(
                 code="too_light",

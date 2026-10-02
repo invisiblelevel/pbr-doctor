@@ -101,8 +101,11 @@ class NormalAnalyzer(BaseAnalyzer):
 
     MAP_TYPE = MapType.NORMAL.value
 
-    def analyze(self, img: np.ndarray) -> Report:
+    def analyze(self, img: np.ndarray,
+                profile_key: str = None,
+                filename: str = None) -> Report:
         img = self.to_float01(img)
+        img = self.downsample_for_analysis(img, max_size=2048)
         n_xyz = _decode_normal(img)
 
         mean_vec = _mean_vector(n_xyz)

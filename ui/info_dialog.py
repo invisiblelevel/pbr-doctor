@@ -53,8 +53,8 @@ def create_info_dialog(page: ft.Page, S: dict,
     # ═══════════════════════════════════════════════════════
 
     about_rows = [
-        (t("info.about.version"), "1.1.0"),
-        (t("info.about.build"),   "2026-09-28"),
+        (t("info.about.version"), "1.1.1-beta"),
+        (t("info.about.build"),   "2026-10-02"),
         (t("info.about.author"),  "INV.LVL"),
         (t("info.about.license"), "Free / Open Source"),
     ]

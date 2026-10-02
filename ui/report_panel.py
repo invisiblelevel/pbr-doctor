@@ -12,13 +12,15 @@ ui/report_panel.py — правая панель с деталями выбра�
 
 Прогресс:
   При применении фикса показывается indeterminate-прогресс
-  в нижней панели лога.
+  в нижней панели лога. Обновление прогресса идёт через
+  поллинг из главного Flet-потока (безопасно для DirectML).
 
 Все строки — через core.i18n.t().
 """
 
 import flet as ft
 import numpy as np
+import asyncio
 
 from core.state import MapType, MapEntry, map_label
 from core.io import pil_to_b64
@@ -72,7 +74,6 @@ def build_report_panel(S: dict, page: ft.Page) -> ft.Control:
         else:
             inner.controls.append(_verdict(S, page, T, entry))
 
-            # Дропдаун профиля — только для albedo
             if entry.map_type == MapType.ALBEDO:
                 inner.controls.append(_profile_selector(S, page, T, entry))
 
@@ -80,7 +81,6 @@ def build_report_panel(S: dict, page: ft.Page) -> ft.Control:
             inner.controls.append(divider(T["input"]))
             inner.controls.append(_issues(S, page, T, entry))
 
-            # Кнопка сброса фиксов — если есть хоть один
             if entry.had_fixes or entry.fix_history:
                 inner.controls.append(
                     _reset_fixes_button(S, page, T, entry)
@@ -126,23 +126,174 @@ def _header(T, entry: MapEntry) -> ft.Control:
 
 
 def _preview(T, entry: MapEntry) -> ft.Control:
-    """Превью рабочей версии карты."""
-    try:
-        b64 = pil_to_b64(entry.working, max_size=380)
-    except Exception:
-        b64 = None
+    """Превью рабочей версии карты. Клик — открывает большую модалку."""
+    cache_key = id(entry.working)
+    cached = getattr(entry, "_preview_cache", None)
+
+    if cached is not None and cached[0] == cache_key:
+        b64 = cached[1]
+    else:
+        try:
+            b64 = pil_to_b64(entry.working, max_size=380)
+        except Exception:
+            b64 = None
+        try:
+            entry._preview_cache = (cache_key, b64)
+        except Exception:
+            pass
 
     if b64 is None:
         return ft.Container()
 
+    def on_preview_click(e):
+        _open_full_preview(e.page, T, entry)
+
     return ft.Container(
-        content=ft.Image(src=f"data:image/png;base64,{b64}",
-                         fit=ft.BoxFit.CONTAIN),
+        content=ft.Stack([
+            ft.Image(src=f"data:image/png;base64,{b64}",
+                     fit=ft.BoxFit.CONTAIN),
+            # Подсказка «клик для увеличения» в углу
+            ft.Container(
+                content=ft.Row([
+                    img_icon("eye", T["fg"], 12),
+                    ft.Text("Увеличить", color=T["fg"], size=10,
+                            font_family=FONT),
+                ], spacing=4, tight=True,
+                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                bgcolor="#00000099",
+                border_radius=6,
+                padding=ft.Padding.symmetric(vertical=3, horizontal=8),
+                right=6, bottom=6,
+            ),
+        ]),
         height=200,
         bgcolor=T["card"],
         border_radius=8,
         alignment=ft.Alignment.CENTER,
+        on_click=on_preview_click,
+        ink=True,
+        tooltip="Клик — открыть на весь экран",
     )
+
+
+def _open_full_preview(page: ft.Page, T, entry: MapEntry):
+    """Модалка с большой картинкой + переключение before/after."""
+    # Готовим большую версию превью (до 1400px по длинной стороне)
+    try:
+        b64_big = pil_to_b64(entry.working, max_size=1400)
+    except Exception:
+        return
+
+    if b64_big is None:
+        return
+
+    # ─── Сборка содержимого модалки ───
+    img_ctrl = ft.Image(
+        src=f"data:image/png;base64,{b64_big}",
+        fit=ft.BoxFit.CONTAIN,
+    )
+
+    img_container = ft.Container(
+        content=img_ctrl,
+        bgcolor=T["card"],
+        border_radius=8,
+        padding=8,
+        alignment=ft.Alignment.CENTER,
+        expand=True,
+    )
+
+    # ─── Кнопки: показать before / after ───
+    btn_state = {"mode": "after"}   # "after" | "before"
+
+    btn_toggle = ft.Container(
+        content=ft.Row([
+            img_icon("rotate-ccw", T["fg"], 14),
+            ft.Text("Показать оригинал", color=T["fg"], size=12,
+                    font_family=FONT, weight=ft.FontWeight.W_600),
+        ], spacing=6, tight=True,
+           vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        bgcolor=T["card"],
+        border_radius=8,
+        padding=ft.Padding.symmetric(vertical=8, horizontal=12),
+        ink=True,
+    )
+
+    def on_toggle(e):
+        if btn_state["mode"] == "after":
+            btn_state["mode"] = "before"
+            src = entry.original
+            label = "Показать результат"
+        else:
+            btn_state["mode"] = "after"
+            src = entry.working
+            label = "Показать оригинал"
+
+        try:
+            b64 = pil_to_b64(src, max_size=1400)
+        except Exception:
+            return
+
+        img_ctrl.src = f"data:image/png;base64,{b64}"
+        btn_toggle.content.controls[1].value = label
+        page.update()
+
+    btn_toggle.on_click = on_toggle
+
+    # Показываем toggle только если есть фиксы
+    if entry.had_fixes or entry.fix_history:
+        btn_toggle.visible = True
+    else:
+        btn_toggle.visible = False
+
+    # ─── Кнопка закрытия ───
+    btn_close = ft.Container(
+        content=ft.Row([
+            img_icon("x", T["fg"], 14),
+            ft.Text("Закрыть", color=T["fg"], size=12,
+                    font_family=FONT, weight=ft.FontWeight.W_600),
+        ], spacing=6, tight=True,
+           vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        bgcolor=T["card"],
+        border_radius=8,
+        padding=ft.Padding.symmetric(vertical=8, horizontal=12),
+        ink=True,
+    )
+
+    # ─── Заголовок ───
+    title_row = ft.Row([
+        ft.Text(entry.filename, color=T["fg"], size=14,
+                font_family=FONT, weight=ft.FontWeight.W_600,
+                overflow=ft.TextOverflow.ELLIPSIS),
+        ft.Text(f"  •  {entry.working.shape[1]}×{entry.working.shape[0]}",
+                color=T["fg3"], size=12, font_family=FONT_MONO),
+    ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+    # ─── Собираем модалку ───
+    dlg = ft.AlertDialog(
+        modal=True,
+        title=title_row,
+        content=ft.Container(
+            content=img_container,
+            width=1400,
+            height=820,
+            padding=6,
+        ),
+        actions=[btn_toggle, btn_close],
+        actions_alignment=ft.MainAxisAlignment.END,
+        bgcolor=T["panel"],
+    )
+
+    def close(e=None):
+        dlg.open = False
+        page.update()
+
+    btn_close.on_click = close
+    dlg.on_dismiss = close
+
+    if dlg not in page.overlay:
+        page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -150,11 +301,6 @@ def _preview(T, entry: MapEntry) -> ft.Control:
 # ═══════════════════════════════════════════════════════════
 
 def _verdict(S, page, T, entry: MapEntry) -> ft.Control:
-    """
-    Человеко-читаемый вердикт по карте:
-      - Строка состояния (ХОРОШО / ЕСТЬ ЗАМЕЧАНИЯ / ПЛОХО)
-      - Короткий список проблем простым языком
-    """
     report = entry.report
     if report is None:
         return ft.Container()
@@ -219,10 +365,6 @@ def _verdict(S, page, T, entry: MapEntry) -> ft.Control:
 
 
 def _explain_metrics(report) -> list:
-    """
-    Превращает сырые метрики в понятные строки (текст, sev_level).
-    Возвращает список [(строка, 'ok'|'warn'|'fail'), ...].
-    """
     out = []
     m = report.metrics or {}
     mtype = report.map_type
@@ -322,7 +464,7 @@ def _explain_metrics(report) -> list:
         if (std is not None and std >= 0.03
                 and span is not None and span < 0.40):
             out.append((t("verdict.ao.narrow", p1=p1, p99=p99), "warn"))
-            
+
     # ─── ALBEDO ───
     elif mtype == "albedo":
         profile = m.get("profile", "?")
@@ -409,7 +551,6 @@ def _explain_metrics(report) -> list:
         if mtype == "edge" and muddy_pct is not None and muddy_pct >= 10.0:
             out.append((t("verdict.fb.edge_muddy", v=muddy_pct), "warn"))
 
-    # ─── ORM ───
     elif mtype == "orm":
         pass
 
@@ -421,10 +562,6 @@ def _explain_metrics(report) -> list:
 # ═══════════════════════════════════════════════════════════
 
 def _profile_selector(S, page, T, entry: MapEntry) -> ft.Control:
-    """
-    Дропдаун выбора профиля текстуры для albedo-карт.
-    При смене — сохраняет в entry.albedo_profile и переанализирует карту.
-    """
     from core.albedo_profiles import sorted_profile_keys
     from core.analyzers import get_analyzer
     from core.i18n import t
@@ -435,7 +572,7 @@ def _profile_selector(S, page, T, entry: MapEntry) -> ft.Control:
     if current not in profile_keys:
         current = "stone"
 
-    def on_profile_change(e):
+    async def on_profile_change(e):
         new_key = e.control.value
         if new_key == entry.albedo_profile:
             return
@@ -444,25 +581,24 @@ def _profile_selector(S, page, T, entry: MapEntry) -> ft.Control:
         entry.fix_history.clear()
         entry.had_fixes = False
 
-        # Переанализ карты под новый профиль
         analyzer = get_analyzer(entry.map_type.value)
         if analyzer is not None:
             if hasattr(analyzer, "_profile_key"):
                 analyzer._profile_key = new_key
             try:
-                entry.report = analyzer.analyze(
+                entry.report = await asyncio.to_thread(
+                    analyzer.analyze,
                     entry.working,
-                    profile_key=new_key,
-                    filename=entry.filename,
+                    new_key,
+                    entry.filename,
                 )
             except Exception as ex:
                 log(S, f"✗ Переанализ не удался: {ex}", T["danger"])
                 return
 
-        log(S, t("panel.profile_changed", profile=t(f"albedo.profile.{new_key}")),
-            T["fg2"])
+        log(S, t("panel.profile_changed",
+                 profile=t(f"albedo.profile.{new_key}")), T["fg2"])
 
-        # Перерисовать правую панель + таблицу слева
         try:
             panel = S.get("report_panel")
             if panel is not None and hasattr(panel, "render"):
@@ -473,10 +609,7 @@ def _profile_selector(S, page, T, entry: MapEntry) -> ft.Control:
         page.update()
 
     options = [
-        ft.dropdown.Option(
-            key=k,
-            text=t(f"albedo.profile.{k}")
-        )
+        ft.dropdown.Option(key=k, text=t(f"albedo.profile.{k}"))
         for k in profile_keys
     ]
 
@@ -504,8 +637,8 @@ def _profile_selector(S, page, T, entry: MapEntry) -> ft.Control:
         border=ft.Border.all(1, T["input"]),
     )
 
+
 def _raw_metrics_expander(T, report) -> ft.Control:
-    """Свёрнутый блок «Сырые метрики» — клик -> раскрывается."""
     rows = _build_raw_metric_rows(T, report)
     body = ft.Column(rows, spacing=3, tight=True, visible=False)
 
@@ -536,7 +669,6 @@ def _raw_metrics_expander(T, report) -> ft.Control:
 
 
 def _build_raw_metric_rows(T, report) -> list:
-    """Строит строки сырых метрик."""
     rows = []
     for key, val in report.metrics.items():
         if isinstance(val, dict):
@@ -567,32 +699,26 @@ def _build_raw_metric_rows(T, report) -> list:
 # ═══════════════════════════════════════════════════════════
 
 def _reset_fixes_button(S, page, T, entry: MapEntry) -> ft.Control:
-    """
-    Кнопка «Сбросить все фиксы» — возвращает карту к original,
-    сбрасывает report / fix_history / had_fixes и переанализирует.
-    Нужна потому что Undo откатывает только последний фикс,
-    и не для всех типов (иногда prev_working теряется).
-    """
     from core.analyzers import get_analyzer
 
-    def on_reset(e):
+    async def on_reset(e):
         entry.working = entry.original.copy()
         entry.fix_history.clear()
         entry.had_fixes = False
 
         analyzer = get_analyzer(entry.map_type.value)
         if analyzer is not None:
-            # Профиль — из entry (для albedo)
             if (entry.map_type == MapType.ALBEDO
                     and entry.albedo_profile
                     and hasattr(analyzer, "_profile_key")):
                 analyzer._profile_key = entry.albedo_profile
 
             try:
-                entry.report = analyzer.analyze(
+                entry.report = await asyncio.to_thread(
+                    analyzer.analyze,
                     entry.working,
-                    profile_key=entry.albedo_profile,
-                    filename=entry.filename,
+                    entry.albedo_profile,
+                    entry.filename,
                 )
             except Exception:
                 entry.report = None
@@ -601,7 +727,6 @@ def _reset_fixes_button(S, page, T, entry: MapEntry) -> ft.Control:
 
         log(S, t("panel.fixes_reset_log", name=entry.filename), T["fg2"])
 
-        # Перерисовать правую панель
         try:
             panel = S.get("report_panel")
             if panel is not None and hasattr(panel, "render"):
@@ -609,11 +734,8 @@ def _reset_fixes_button(S, page, T, entry: MapEntry) -> ft.Control:
         except Exception:
             pass
 
-        # Перерисовать таблицу слева (кол-во issues, светофор)
         try:
-            # таблица в Analyze-вкладке
             from ui.tab_analyze import rebuild_table
-            # найдём table_container через S
             tc = S.get("analyze_table_container")
             osm = S.get("analyze_on_select_map")
             if tc is not None:
@@ -639,8 +761,8 @@ def _reset_fixes_button(S, page, T, entry: MapEntry) -> ft.Control:
         padding=ft.Padding.symmetric(vertical=6),
     )
 
+
 def _issues(S, page, T, entry: MapEntry) -> ft.Control:
-    """Список Issue с кнопками Fix."""
     report = entry.report
     if not report or not report.issues:
         return ft.Container(
@@ -664,7 +786,6 @@ def _issues(S, page, T, entry: MapEntry) -> ft.Control:
 
 
 def _make_issue_card(S, page, T, entry: MapEntry, issue) -> ft.Control:
-    """Одна карточка issue с кнопкой Fix."""
     sev_color = SEV_COLORS.get(issue.severity.value, T["fg2"])
 
     head = ft.Row([
@@ -722,7 +843,6 @@ def _make_issue_card(S, page, T, entry: MapEntry, issue) -> ft.Control:
 
 
 def _make_fix_result_row(S, page, T, entry: MapEntry, rec: dict) -> ft.Control:
-    """Строка результата фикса + кнопка Undo."""
     before = rec.get("sev_before", "fail")
     after = rec.get("sev_after", "fail")
 
@@ -730,7 +850,6 @@ def _make_fix_result_row(S, page, T, entry: MapEntry, rec: dict) -> ft.Control:
     b = order.get(before, 3)
     a = order.get(after, 3)
 
-    # Считаем улучшения метрик по тому же принципу что в модалке
     from ui.dialogs_fix import _compute_metric_deltas
 
     mb = rec.get("prev_report").metrics if rec.get("prev_report") else {}
@@ -788,7 +907,7 @@ def _make_fix_result_row(S, page, T, entry: MapEntry, rec: dict) -> ft.Control:
 
 
 # ═══════════════════════════════════════════════════════════
-#  ФИКСЫ (с indeterminate прогрессом)
+#  ФИКСЫ (с диагностическими print)
 # ═══════════════════════════════════════════════════════════
 
 async def _apply_fix_inline(S, page, T, entry: MapEntry, fix_id: str,
@@ -796,9 +915,13 @@ async def _apply_fix_inline(S, page, T, entry: MapEntry, fix_id: str,
                             bottom_slot: ft.Container):
     """
     Применяет фикс, показывает результат + модалку.
-    Async — чтобы показывать indeterminate прогресс во время работы.
+    Async — чтобы не блокировать Flet-поток.
+
+    ВНИМАНИЕ: тут стоят диагностические print для отладки —
+    убрать после того как поймём где именно виснет.
     """
     from ui.dialogs_fix import show_fix_result
+
 
     analyzer = get_analyzer(entry.map_type.value)
     if analyzer is None:
@@ -821,59 +944,98 @@ async def _apply_fix_inline(S, page, T, entry: MapEntry, fix_id: str,
     prev_working = entry.working.copy()
     prev_report = entry.report
 
-    # ─── indeterminate прогресс ───
-    from ui.helpers import show_progress as _show_prog
-    await _show_prog(S, page, fix_label)
+    # ─── Показать прогресс ───
+    await show_progress(S, page, fix_label)
 
-    # ─── callback для промежуточного прогресса (ORM Fix All) ───
+    # ─── Callback прогресса: только пишет в S, БЕЗ page.update() ───
     from core.analyzers.base import set_progress_callback
-    from ui.helpers import update_progress as _upd
 
-    def _progress_cb(text):
+    def _progress_cb(text, done=0, total=0):
         try:
-            _upd(S, page, 0, 0, text)
+            S["progress_text_value"] = text
+            S["progress_done"] = done
+            S["progress_total"] = total
         except Exception:
             pass
 
     set_progress_callback(_progress_cb)
 
-    # Если это albedo — прокидываем профиль из entry в анализатор,
-    # иначе fix не знает под какой профиль чинить
+    # ─── Поллинг из главного потока ───
+    poll_state = {"running": True}
+
+    async def _poll_progress():
+        while poll_state["running"]:
+            try:
+                if S.get("progress_panel") is not None:
+                    S["progress_panel"].visible = True
+                if S.get("progress_text") is not None:
+                    txt = S.get("progress_text_value")
+                    if txt:
+                        S["progress_text"].value = txt
+                if S.get("progress_bar") is not None:
+                    done = S.get("progress_done", 0)
+                    total = S.get("progress_total", 0)
+                    if total > 0:
+                        S["progress_bar"].value = max(
+                            0.0, min(1.0, done / total)
+                        )
+                    else:
+                        S["progress_bar"].value = None
+                page.update()
+            except Exception:
+                pass
+            await asyncio.sleep(0.25)
+
+    poll_task = asyncio.create_task(_poll_progress())
+
+    # Профиль для albedo
     if (entry.map_type == MapType.ALBEDO
             and entry.albedo_profile
             and hasattr(analyzer, "_profile_key")):
         analyzer._profile_key = entry.albedo_profile
 
+    # ─── Применение фикса в отдельном потоке ───
     try:
-        fixed = analyzer.fix(entry.working, fix_id)
+        fixed = await asyncio.to_thread(analyzer.fix,
+                                         entry.working, fix_id)
     except Exception as ex:
         set_progress_callback(None)
+        poll_state["running"] = False
+        await asyncio.sleep(0.5)
         await hide_progress(S, page)
         log(S, t("panel.fix_fail", fix=fix_id, err=str(ex)), T["danger"])
         return
     finally:
         set_progress_callback(None)
 
+
     entry.working = fixed
     entry.had_fixes = True
 
-    # сбрасываем кеш seam (для seamless-вкладки)
     try:
         entry._seam_cache = None
     except Exception:
         pass
 
+    # ─── Пересчёт отчёта тоже в потоке ───
     try:
-        entry.report = analyzer.analyze(
+        entry.report = await asyncio.to_thread(
+            analyzer.analyze,
             entry.working,
-            profile_key=entry.albedo_profile,
-            filename=entry.filename,
+            entry.albedo_profile,
+            entry.filename,
         )
     except Exception as ex:
+        poll_state["running"] = False
+        await asyncio.sleep(0.5)
         await hide_progress(S, page)
         log(S, t("panel.refix_fail", err=str(ex)), T["danger"])
         return
 
+
+    # ─── Останавливаем поллинг ───
+    poll_state["running"] = False
+    await asyncio.sleep(0.5)
     await hide_progress(S, page)
 
     sev_after = entry.report.severity.value
@@ -922,8 +1084,8 @@ async def _apply_fix_inline(S, page, T, entry: MapEntry, fix_id: str,
         pass
 
 
+
 def _undo_fix(S, page, T, entry: MapEntry, rec: dict):
-    """Откатывает фикс из истории."""
     prev_working = rec.get("prev_working")
     if prev_working is None:
         return
@@ -931,7 +1093,6 @@ def _undo_fix(S, page, T, entry: MapEntry, rec: dict):
     entry.working = prev_working
     entry.report = rec.get("prev_report")
 
-    # сброс кеша seam
     try:
         entry._seam_cache = None
     except Exception:

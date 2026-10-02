@@ -1,8 +1,5 @@
 """
 ui/helpers.py — лог, статистика, прогресс-бары.
-
-Работает с любым dict-like S (словарём состояния из core/state.py).
-Не импортирует core — не создаёт циклических зависимостей.
 """
 
 import asyncio
@@ -11,10 +8,6 @@ import flet as ft
 FONT = "Segoe UI"
 FONT_MONO = "Consolas"
 
-
-# ═══════════════════════════════════════════════════════════
-#  ЛОГ
-# ═══════════════════════════════════════════════════════════
 
 def log(S: dict, text: str, color: str = None, fg2: str = "#9aa0a6"):
     """Добавляет строку в лог и обновляет ListView."""
@@ -25,7 +18,6 @@ def log(S: dict, text: str, color: str = None, fg2: str = "#9aa0a6"):
 
 
 def refresh_log(S: dict):
-    """Перерисовывает весь лог из S['log_lines']."""
     lc = S.get("log_column_bottom")
     if lc is None:
         return
@@ -35,7 +27,6 @@ def refresh_log(S: dict):
             ft.Text(txt, color=col, size=13, font_family=FONT_MONO,
                     selectable=True, expand=True)
         )
-    # Обновляем свёрнутый preview, если есть
     prev = S.get("log_collapsed_preview")
     if prev is not None:
         if S["log_lines"]:
@@ -47,19 +38,13 @@ def refresh_log(S: dict):
 
 
 def clear_log(S: dict):
-    """Очищает лог."""
     S["log_lines"].clear()
     refresh_log(S)
 
 
-# ═══════════════════════════════════════════════════════════
-#  СТАТИСТИКА
-# ═══════════════════════════════════════════════════════════
-
 def add_stat(S: dict, label: str, value: str,
              color: str = None, fg2: str = "#9aa0a6",
              fg3: str = "#5f6368"):
-    """Добавляет строку в панель статистики."""
     col = color or fg2
     S["stats_lines"].append((label, value, col))
     col_ctrl = S.get("stats_column")
@@ -75,7 +60,6 @@ def add_stat(S: dict, label: str, value: str,
 
 
 def clear_stats(S: dict):
-    """Очищает панель статистики."""
     S["stats_lines"].clear()
     col_ctrl = S.get("stats_column")
     if col_ctrl is not None:
@@ -83,12 +67,11 @@ def clear_stats(S: dict):
 
 
 # ═══════════════════════════════════════════════════════════
-#  ПРОГРЕСС-БАРЫ (async)
+#  ПРОГРЕСС
 # ═══════════════════════════════════════════════════════════
 
-async def show_progress(S: dict, page: ft.Page, text: str = "Обработка...",
-                        fg2: str = "#9aa0a6"):
-    """Показать indeterminate прогресс-плашку с текстом."""
+async def show_progress(S: dict, page: ft.Page, text: str = "Обработка..."):
+    """Показать прогресс-плашку. Полоска в режиме indeterminate."""
     panel = S.get("progress_panel")
     bar = S.get("progress_bar")
     lbl = S.get("progress_text")
@@ -97,7 +80,7 @@ async def show_progress(S: dict, page: ft.Page, text: str = "Обработка.
         panel.visible = True
     if bar:
         bar.visible = True
-        bar.value = None
+        bar.value = None      # indeterminate крутилка
     if lbl:
         lbl.value = text
         lbl.visible = True
@@ -116,30 +99,14 @@ async def hide_progress(S: dict, page: ft.Page):
     await asyncio.sleep(0.02)
 
 
-def show_indeterminate(S: dict, page: ft.Page, text: str = "Обработка..."):
-    """То же, что show_progress, но без await — для sync-контекста."""
-    panel = S.get("progress_panel")
-    bar = S.get("progress_bar")
-    lbl = S.get("progress_text")
-
-    if panel:
-        panel.visible = True
-    if bar:
-        bar.visible = True
-        bar.value = None
-    if lbl:
-        lbl.value = text
-        lbl.visible = True
-
-    try:
-        page.update()
-    except Exception:
-        pass
-
-
 def update_progress(S: dict, page: ft.Page,
                     done: int, total: int = 0, text: str = None):
-    """Обновляет текст прогресс-плашки. Полоска всегда бегает."""
+    """
+    Обновляет прогресс-плашку.
+      - Если total > 0 → bar.value = done/total (determinate).
+      - Если total == 0 → indeterminate.
+      - text → в подпись.
+    """
     panel = S.get("progress_panel")
     bar = S.get("progress_bar")
     lbl = S.get("progress_text")
@@ -148,13 +115,17 @@ def update_progress(S: dict, page: ft.Page,
         panel.visible = True
     if bar:
         bar.visible = True
-        bar.value = None
+        if total > 0:
+            bar.value = max(0.0, min(1.0, done / total))
+        else:
+            bar.value = None
     if lbl:
         lbl.visible = True
         if text is not None:
             lbl.value = text
         elif total > 0:
-            lbl.value = f"{done} / {total}"
+            pct = int(done / total * 100)
+            lbl.value = f"{done} / {total}  ({pct}%)"
 
     try:
         page.update()

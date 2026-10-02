@@ -161,7 +161,13 @@ class BaseAnalyzer:
 
     MAP_TYPE: str = "unknown"
 
-    def analyze(self, img: np.ndarray) -> Report:
+    def analyze(self, img: np.ndarray,
+                profile_key: str = None,
+                filename: str = None) -> Report:
+        """
+        profile_key и filename — опциональные, нужны только albedo-анализатору.
+        Остальные их игнорируют. Единая сигнатура — чтобы UI звал всех одинаково.
+        """
         raise NotImplementedError
 
     def fix(self, img: np.ndarray, fix_id: str) -> np.ndarray:
@@ -195,6 +201,37 @@ class BaseAnalyzer:
         return (0.2126 * img[:, :, 0]
                 + 0.7152 * img[:, :, 1]
                 + 0.0722 * img[:, :, 2])
+
+    @staticmethod
+    def downsample_for_analysis(img: np.ndarray,
+                                 max_size: int = 2048) -> np.ndarray:
+        """
+        Если карта больше max_size по любой стороне — уменьшает
+        пропорционально до max_size. Для анализа это ОК: статистика
+        на 2K отличается от 8K на доли процента, а скорость в 16 раз выше.
+
+        Фиксы работают с полным разрешением, даунсемпл только для analyze().
+        """
+        if img.ndim < 2:
+            return img
+        h, w = img.shape[:2]
+        longest = max(h, w)
+        if longest <= max_size:
+            return img
+
+        import cv2
+        scale = max_size / float(longest)
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+
+        # cv2.resize ожидает float32, работает быстро
+        if img.ndim == 3:
+            resized = cv2.resize(img, (new_w, new_h),
+                                  interpolation=cv2.INTER_AREA)
+        else:
+            resized = cv2.resize(img, (new_w, new_h),
+                                  interpolation=cv2.INTER_AREA)
+        return resized.astype(np.float32)
                 
 # ═══════════════════════════════════════════════════════════
 #  ГЛОБАЛЬНЫЙ CALLBACK ДЛЯ ПРОГРЕССА (используется ORM Fix All)
@@ -208,11 +245,30 @@ def set_progress_callback(fn):
     _PROGRESS_CB["fn"] = fn
 
 
-def emit_progress(text: str):
-    """Толкнуть текст в callback, если он установлен."""
+def emit_progress(text: str, done: int = 0, total: int = 0):
+    """
+    Толкнуть прогресс в callback, если он установлен.
+    done/total — опционально, для determinate прогресс-бара.
+    """
     fn = _PROGRESS_CB.get("fn")
     if fn:
         try:
-            fn(text)
+            fn(text, done, total)
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════
+#  МАСШТАБ ПРОГРЕССА (для многопроходных фиксов)
+# ═══════════════════════════════════════════════════════════
+
+_PROGRESS_SCALE = {"lo": 0.0, "hi": 1.0}
+
+
+def set_progress_scale(lo: float, hi: float):
+    _PROGRESS_SCALE["lo"] = float(lo)
+    _PROGRESS_SCALE["hi"] = float(hi)
+
+
+def get_progress_scale() -> tuple:
+    return _PROGRESS_SCALE["lo"], _PROGRESS_SCALE["hi"]
