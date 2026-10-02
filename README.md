@@ -2,7 +2,7 @@
 
 **Diagnose and repair AI-generated PBR maps** · **Диагностика и ремонт PBR-карт после AI-генерации** · **AI 生成的 PBR 贴图诊断与修复**
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-1.1.1--beta-blue.svg)](../../releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)](#install)
 [![Python](https://img.shields.io/badge/python-3.14-3776AB.svg)](https://www.python.org/)
@@ -19,18 +19,15 @@ PBR Doctor is a standalone tool for diagnosing and repairing PBR maps produced b
 
 Load maps → get a report of what's wrong → fix in one click → save as 8-bit or 16-bit. A dedicated **Seamless** tab brings maps to tileable form.
 
-### What's new in 1.1.0
+### What's new in 1.1.1-beta
 
-- **Albedo / BaseColor analyzer** — 7 checks (soapiness, exposure, contrast, saturation, color cast) with 50 texture profiles (metal, wood, stone, fabric, ...) and **SCUNet-based soapiness fix**
-- **ORM analyzer** — per-channel analysis (R=AO, G=Roughness, B=Metallic) with "Fix All"
-- **Fallback analyzer** for Height / Edge / Unknown maps
-- **Seamless tab** — three algorithms (mirror-blend, frequency-separation, hi-pass GIMP)
-- **Full localization** — EN / RU / ZH with system auto-detection and switcher in the header
-- **Human-readable metrics** in the fix dialog — before/after table with norms, arrows and percent signs
-- **Reset all fixes** button — one-click rollback when Undo isn't enough
-- **Delete maps** from the list via trash icon in each row
-- **Texture profile dropdown** for Albedo maps — override auto-detection if the filename lies
-- **Manual map type override** via dropdown in the map list
+- **DirectML GPU backend** — soapiness removal (SCUNet-GAN) now runs on **any DirectX 12 GPU**: NVIDIA, AMD, Intel. **No CUDA, no cuDNN, no TensorRT installation required.** CPU fallback if DirectML is unavailable
+- **~2× faster soapiness fix** — the second model pass was removed; quality is unaffected, inference time is halved
+- **Full-screen preview** — click any map thumbnail to inspect it at full resolution, with a Before / After toggle
+- **Real progress bar** — determinate percentage and a live tile counter instead of an indeterminate spinner
+- **Fixed UI freeze on 8K maps** — analysis and fixes now run on a background thread; the interface stays responsive
+- **Smarter map detection** — Albedo and ORM are now classified by filename priority, so AI-generated albedo maps are no longer misdetected as Metallic or Edge
+- **Cleaner output** — diagnostic logging removed from the console
 
 ### Features
 
@@ -56,23 +53,35 @@ Load maps → get a report of what's wrong → fix in one click → save as 8-bi
 | Height / Displacement | basic grayscale and range checks |
 | Edge / Outline | binarity, noise |
 
+### GPU acceleration
+
+Soapiness removal runs SCUNet-GAN through **DirectML**, a universal GPU backend that works on any DirectX 12 graphics adapter. No proprietary SDKs required.
+
+If DirectML is unavailable, inference falls back to CPU automatically — the app always works, GPU is just faster.
+
 ### Install
 
-Download **PBR Doctor Setup.exe** from [Releases](../../releases), run, install. No Python or dependencies needed — everything is bundled.
+Download **PBR Doctor Setup v1.1.1-beta.exe** from [Releases](../../releases), run, install (choose English / Russian / Chinese). No Python or dependencies needed — everything is bundled.
 
-Windows 10 / 11 (64-bit) supported.
+Windows 10 version 1903 or newer / Windows 11 (64-bit).
 
 ### Build from source
 
-Install dependencies: `pip install -r requirements.txt`
+Install dependencies:
 
-Build the exe: `python -m PyInstaller "PBR Doctor.spec" --noconfirm --clean`
+    pip install -r requirements.txt
 
-Build the installer (requires [Inno Setup 6](https://jrsoftware.org/isdl.php)): `"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss`
+Build the exe:
+
+    python -m PyInstaller pbr_doctor.spec --noconfirm --clean
+
+Build the installer (requires [Inno Setup 7](https://jrsoftware.org/isdl.php)):
+
+    "C:\Program Files\Inno Setup 7\ISCC.exe" installer.iss
 
 ### Stack
 
-Python 3.14 · Flet 1.0 · NumPy · Pillow · OpenCV · SCUNet-GAN (ONNX) · PyInstaller · Inno Setup
+Python 3.14 · Flet 1.0 · NumPy · Pillow · OpenCV · onnxruntime-directml · SCUNet-GAN (ONNX) · PyInstaller · Inno Setup
 
 ### License
 
@@ -90,18 +99,15 @@ PBR Doctor — отдельная программа для проверки и 
 
 Загружаешь карты → получаешь отчёт, что не так → фиксишь в один клик → сохраняешь результат в 8-bit или 16-bit. Отдельная вкладка **Seamless** для приведения карт к бесшовному тайлингу.
 
-### Что нового в 1.1.0
+### Что нового в 1.1.1-beta
 
-- **Анализатор Albedo / BaseColor** — 7 проверок (мыльность, недосвет/пересвет, контраст, насыщенность, цветовой сдвиг) + **50 профилей текстур** (металл, дерево, камень, ткань, ...) + **фикс мыла через SCUNet**
-- **Анализатор ORM** — per-channel (R=AO, G=Roughness, B=Metallic) с фиксом «починить всё»
-- **Fallback-анализатор** для Height / Edge / Unknown карт
-- **Вкладка Seamless** — три алгоритма (mirror-blend, frequency-separation, hi-pass GIMP)
-- **Полная локализация** — EN / RU / ZH с авто-определением системы и переключателем в хедере
-- **Человеческие метрики** в модалке фикса — таблица до/после с нормами, стрелками и процентами
-- **Кнопка «Сбросить все фиксы»** — откат всех фиксов на карте одним кликом
-- **Удаление карт** из списка через корзину в каждой строке
-- **Дропдаун профиля текстуры** для Albedo — переопределение авто-детекта если имя файла врёт
-- **Ручное переключение типа карты** через дропдаун в списке
+- **GPU через DirectML** — удаление мыла (SCUNet-GAN) теперь работает на **любой видеокарте с DirectX 12**: NVIDIA, AMD, Intel. **Не нужно ставить CUDA, cuDNN или TensorRT.** Если DirectML недоступен — автоматический откат на CPU
+- **Фикс мыла в ~2 раза быстрее** — убран второй проход модели, качество не пострадало, время вдвое меньше
+- **Полноэкранное превью** — клик по миниатюре открывает карту на весь экран с переключением «до / после»
+- **Настоящий прогресс-бар** — процент и счётчик обработанных тайлов вместо бесконечной крутилки
+- **Пофикшено зависание интерфейса на 8K** — анализ и фиксы работают в фоновом потоке, окно остаётся живым
+- **Умнее детект карт** — Albedo и ORM теперь определяются по приоритету имени файла, поэтому AI-альбедо больше не улетает в Metallic или Edge
+- **Чистая консоль** — диагностические логи убраны
 
 ### Что умеет
 
@@ -127,23 +133,35 @@ PBR Doctor — отдельная программа для проверки и 
 | Height / Displacement | базовые проверки grayscale и диапазона |
 | Edge / Outline | бинарность, шум |
 
+### Ускорение на GPU
+
+Удаление мыла работает через **DirectML** — универсальный GPU-бэкенд, который поддерживает **любую видеокарту с DirectX 12**. Проприетарные SDK ставить не нужно.
+
+Если DirectML недоступен, инференс автоматически откатывается на CPU — программа работает всегда, GPU просто быстрее.
+
 ### Установка
 
-Скачай **PBR Doctor Setup.exe** из раздела [Releases](../../releases), запусти, установи. Python и зависимости не нужны — всё вшито в инсталлер.
+Скачай **PBR Doctor Setup v1.1.1-beta.exe** из раздела [Releases](../../releases), запусти, установи (выбери язык: русский / английский / китайский). Python и зависимости не нужны — всё вшито в инсталлер.
 
-Поддерживается Windows 10 / 11 (64-bit).
+Поддерживается Windows 10 (версия 1903+) / Windows 11 (64-bit).
 
 ### Сборка из исходников
 
-Установить зависимости: `pip install -r requirements.txt`
+Установить зависимости:
 
-Собрать exe: `python -m PyInstaller "PBR Doctor.spec" --noconfirm --clean`
+    pip install -r requirements.txt
 
-Собрать инсталлер (требуется [Inno Setup 6](https://jrsoftware.org/isdl.php)): `"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss`
+Собрать exe:
+
+    python -m PyInstaller pbr_doctor.spec --noconfirm --clean
+
+Собрать инсталлер (требуется [Inno Setup 7](https://jrsoftware.org/isdl.php)):
+
+    "C:\Program Files\Inno Setup 7\ISCC.exe" installer.iss
 
 ### Стек
 
-Python 3.14 · Flet 1.0 · NumPy · Pillow · OpenCV · SCUNet-GAN (ONNX) · PyInstaller · Inno Setup
+Python 3.14 · Flet 1.0 · NumPy · Pillow · OpenCV · onnxruntime-directml · SCUNet-GAN (ONNX) · PyInstaller · Inno Setup
 
 ### Лицензия
 
@@ -161,18 +179,15 @@ PBR Doctor 是一款独立的 PBR 贴图诊断与修复工具，专为 AI 生成
 
 加载贴图 → 获取问题报告 → 一键修复 → 保存为 8-bit 或 16-bit。独立的 **无缝（Seamless）** 标签页可将贴图处理为无缝平铺。
 
-### 1.1.0 新功能
+### 1.1.1-beta 新功能
 
-- **反照率 / 基础色分析器** — 7 项检查（模糊度、曝光、对比度、饱和度、色偏）+ **50 种材质配置**（金属、木材、石材、织物等）+ **基于 SCUNet 的模糊修复**
-- **ORM 分析器** — 分通道（R=AO，G=粗糙度，B=金属度），支持「全部修复」
-- **回退分析器** — 针对 Height / Edge / Unknown 贴图
-- **无缝（Seamless）标签页** — 三种算法（镜像混合、频率分离、高通 GIMP）
-- **完整本地化** — 英语 / 俄语 / 中文，支持系统自动检测与顶栏切换
-- **人性化指标** — 修复对话框显示前后对比表格，包含正常范围、箭头和百分比
-- **「重置所有修复」按钮** — 一键回退某张贴图的所有修复
-- **删除贴图** — 每行右侧垃圾桶图标可从列表移除
-- **材质配置下拉菜单** — 用于反照率贴图，可覆盖按文件名的自动识别
-- **手动切换贴图类型** — 列表中的下拉菜单
+- **DirectML GPU 后端** — 模糊修复（SCUNet-GAN）现在可在 **任何支持 DirectX 12 的显卡**上运行：NVIDIA、AMD、Intel。**无需安装 CUDA、cuDNN 或 TensorRT。** 若 DirectML 不可用，将自动回退到 CPU
+- **模糊修复速度提升约 2 倍** — 移除了第二次模型推理，画质不变，耗时减半
+- **全屏预览** — 点击缩略图可全屏查看贴图，并支持「前 / 后」切换
+- **真正的进度条** — 显示百分比和处理进度，不再是无限循环的转圈
+- **修复 8K 贴图的界面冻结问题** — 分析与修复在后台线程运行，界面保持响应
+- **更智能的贴图识别** — Albedo 和 ORM 现在按文件名优先级识别，AI 生成的反照率贴图不再被误判为金属度或边缘
+- **控制台输出更干净** — 移除了调试日志
 
 ### 功能
 
@@ -198,23 +213,35 @@ PBR Doctor 是一款独立的 PBR 贴图诊断与修复工具，专为 AI 生成
 | 高度 / 置换（Height） | 灰度与范围基础检查 |
 | 边缘 / 描边（Edge） | 二值性、噪声 |
 
+### GPU 加速
+
+模糊修复通过 **DirectML** 运行 —— 一个通用 GPU 后端，支持任何 DirectX 12 显卡。无需安装专有 SDK。
+
+若 DirectML 不可用，将自动回退到 CPU —— 程序始终可用，GPU 只是更快。
+
 ### 安装
 
-从 [Releases](../../releases) 下载 **PBR Doctor Setup.exe**，运行并安装。无需 Python 或任何依赖 — 全部已打包。
+从 [Releases](../../releases) 下载 **PBR Doctor Setup v1.1.1-beta.exe**，运行并安装（可选英语 / 俄语 / 中文）。无需 Python 或任何依赖 — 全部已打包。
 
-支持 Windows 10 / 11（64 位）。
+支持 Windows 10（1903 或更新版本）/ Windows 11（64 位）。
 
 ### 从源码构建
 
-安装依赖：`pip install -r requirements.txt`
+安装依赖：
 
-构建 exe：`python -m PyInstaller "PBR Doctor.spec" --noconfirm --clean`
+    pip install -r requirements.txt
 
-构建安装包（需先安装 [Inno Setup 6](https://jrsoftware.org/isdl.php)）：`"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss`
+构建 exe：
+
+    python -m PyInstaller pbr_doctor.spec --noconfirm --clean
+
+构建安装包（需先安装 [Inno Setup 7](https://jrsoftware.org/isdl.php)）：
+
+    "C:\Program Files\Inno Setup 7\ISCC.exe" installer.iss
 
 ### 技术栈
 
-Python 3.14 · Flet 1.0 · NumPy · Pillow · OpenCV · SCUNet-GAN (ONNX) · PyInstaller · Inno Setup
+Python 3.14 · Flet 1.0 · NumPy · Pillow · OpenCV · onnxruntime-directml · SCUNet-GAN (ONNX) · PyInstaller · Inno Setup
 
 ### 许可证
 
